@@ -1,5 +1,7 @@
 # 二进制重排
 
+TODO: 1.补充内存与虚拟内存介绍 2.实现代码详解
+
 ## 介绍
 
 去年年底二进制重排的概念被宇宙厂带火了起来，出于学习的目的，综合网上已有资料并总结实现了下，以便对启动优化有更好的了解。
@@ -175,9 +177,10 @@ void __sanitizer_cov_trace_pc_guard_init(uint32_t *start,
 //    __sanitizer_cov_trace_pc_guard(guard);
 void __sanitizer_cov_trace_pc_guard(uint32_t *guard) {
     // If initialization has not occurred yet (meaning that guard is uninitialized), that means that initial functions like +load are being run. These functions will only be run once anyways, so we should always allow them to be recorded and ignore guard
-    if (stopCollecting) {
+    if (stopCollecting && !*guard) {
         return;
     }
+
     // If you set *guard to 0 this code will not be called again for this edge.
     // Now you can get the PC and do whatever you want:
     //   store it somewhere or symbolize it and print right away.
