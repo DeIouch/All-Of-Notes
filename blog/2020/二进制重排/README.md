@@ -6,9 +6,15 @@ TODO: 1.补充内存与虚拟内存介绍 2.实现代码详解
 
 去年年底二进制重排的概念被宇宙厂带火了起来，出于学习的目的，综合网上已有资料并总结实现了下，以便对启动优化有更好的了解。
 
+对比了网上的实现方式，抖音通过手动插桩获取的符号数据，包括C++静态初始化、+Load、Block等都需要针对性处理，就其复杂度来说感觉性价比不高；手淘的方案比较特殊，通过修改 .o 目标文件实现静态插桩，需要对目标代码较为熟悉，通用性不高；最后决定采用 clang 插桩的方式实现二进制重排。
+
+先介绍一些基本的概念以便对实现有更好的了解。
+
 ### App启动和内存加载
 
 Linux 系统下，进程申请内存并不是直接物理内存给我们运行，而是只标记当前进程拥有该段内存，当真正使用这段段内存时才会分配，此时的内存是虚拟内存。
+
+> 虚拟内存是作为内存的管理和保护工具诞生的，
 
 当我们需要访问一个内存地址时，如果虚拟内存地址对应的物理内存还未分配，CPU 会执行 `page fault`，将指令从磁盘加载到物理内存中并进行验签操作（App Store 发布情况下）。
 
@@ -142,7 +148,7 @@ Link Map 是 App 编译过程的中间产物，记载了二进制文件的布局
 
 ### SanitizerCoverage采集调用函数信息
 
-SanitizerCoverage内置在LLVM中，可以在函数、基本块和边界这些级别上插入对用户定义函数的回调，详细介绍可以再 [Clang 11 documentation](http://clang.llvm.org/docs/index.html) 找到。
+SanitizerCoverage内置在LLVM中，可以在函数、基本块和边界这些级别上插入对用户定义函数的回调，详细介绍可以在 [Clang 11 documentation](http://clang.llvm.org/docs/index.html) 找到。
 
 在 build settings 里的 “Other C Flags” 中添加 `-fsanitize-coverage=func,trace-pc-guard`。如果含有 Swift 代码的话，还需要在 “Other Swift Flags” 中加入 `-sanitize-coverage=func` 和 `-sanitize=undefined`。需注意，所有链接到 App 中的二进制都需要开启 SanitizerCoverage，这样才能完全覆盖到所有调用。
 
