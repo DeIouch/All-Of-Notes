@@ -1,7 +1,5 @@
 # 二进制重排
 
-TODO: 1.补充内存与虚拟内存介绍 2.实现代码详解
-
 ## 介绍
 
 去年年底二进制重排的概念被宇宙厂带火了起来，出于学习的目的，综合网上已有资料并总结实现了下，以便对启动优化有更好的了解。
@@ -14,7 +12,9 @@ TODO: 1.补充内存与虚拟内存介绍 2.实现代码详解
 
 Linux 系统下，进程申请内存并不是直接物理内存给我们运行，而是只标记当前进程拥有该段内存，当真正使用这段段内存时才会分配，此时的内存是虚拟内存。
 
-> 虚拟内存是作为内存的管理和保护工具诞生的，
+> 在虚拟内存出现前，程序指令必须都在物理内存内，使得物理内存能存放的进程十分有限，并且由于是相邻存储，容易发生越界访问等情况。
+>
+> 虚拟内存是作为 **内存的管理和保护工具** 诞生的，为每个进程提供了一片连续完整的虚拟内存空间，使用时先通过界限寄存器判断访问是否越界，再通过基址寄存器转换为实际内存地址。降低了内存管理的复杂度，保护每个进程的内存地址空间不会被其它进程破坏，并且实现了 **共享缓存功能**，访问时先判断是否已缓存到主存中才通过 CPU 寻址（虚拟地址）访问主存或硬盘。
 
 当我们需要访问一个内存地址时，如果虚拟内存地址对应的物理内存还未分配，CPU 会执行 `page fault`，将指令从磁盘加载到物理内存中并进行验签操作（App Store 发布情况下）。
 
@@ -60,10 +60,6 @@ Link Map 是 App 编译过程的中间产物，记载了二进制文件的布局
 [  0] linker synthesized
 [  1] /Users/yehuangbin/Library/Developer/Xcode/DerivedData/IOSDevelopTools-bpjwhcswecoziihayzwjgxztowne/Build/Intermediates.noindex/IOSDevelopTools.build/Debug-iphoneos/IOSDevelopTools.build/Objects-normal/arm64/YECallMonitor.o
 [  2] /Users/yehuangbin/Library/Developer/Xcode/DerivedData/IOSDevelopTools-bpjwhcswecoziihayzwjgxztowne/Build/Intermediates.noindex/IOSDevelopTools.build/Debug-iphoneos/IOSDevelopTools.build/Objects-normal/arm64/YECallRecordCell.o
-[  3] /Users/yehuangbin/Library/Developer/Xcode/DerivedData/IOSDevelopTools-bpjwhcswecoziihayzwjgxztowne/Build/Intermediates.noindex/IOSDevelopTools.build/Debug-iphoneos/IOSDevelopTools.build/Objects-normal/arm64/YECallRecordModel.o
-[  4] /Users/yehuangbin/Library/Developer/Xcode/DerivedData/IOSDevelopTools-bpjwhcswecoziihayzwjgxztowne/Build/Intermediates.noindex/IOSDevelopTools.build/Debug-iphoneos/IOSDevelopTools.build/Objects-normal/arm64/YECallTraceCore.o
-[  5] /Users/yehuangbin/Library/Developer/Xcode/DerivedData/IOSDevelopTools-bpjwhcswecoziihayzwjgxztowne/Build/Intermediates.noindex/IOSDevelopTools.build/Debug-iphoneos/IOSDevelopTools.build/Objects-normal/arm64/fishhook.o
-[  6] /Users/yehuangbin/Library/Developer/Xcode/DerivedData/IOSDevelopTools-bpjwhcswecoziihayzwjgxztowne/Build/Intermediates.noindex/IOSDevelopTools.build/Debug-iphoneos/IOSDevelopTools.build/Objects-normal/arm64/ViewController.o
 ...
 
 // Section是各种数据类型所在的内存空间，Section主要分为两大类，__Text和__DATA。__Text指的是程序代码，__DATA指的是已经初始化的变量等。
@@ -74,18 +70,6 @@ Link Map 是 App 编译过程的中间产物，记载了二进制文件的布局
 0x100010B74	0x000002DC	__TEXT	__stub_helper
 0x100010E50	0x00000088	__TEXT	__const
 0x100010ED8	0x000006EC	__TEXT	__cstring
-0x1000115C4	0x000019EF	__TEXT	__objc_methname
-0x100012FB4	0x00000134	__TEXT	__ustring
-0x1000130E8	0x000000F6	__TEXT	__objc_classname
-0x1000131DE	0x00000CBF	__TEXT	__objc_methtype
-0x100013EA0	0x00000160	__TEXT	__unwind_info
-0x100014000	0x00000030	__DATA	__got
-0x100014030	0x000001D8	__DATA	__la_symbol_ptr
-0x100014208	0x000001C0	__DATA	__const
-0x1000143C8	0x000004A0	__DATA	__cfstring
-0x100014868	0x00000038	__DATA	__objc_classlist
-0x1000148A0	0x00000008	__DATA	__objc_catlist
-0x1000148A8	0x00000028	__DATA	__objc_protolist
 ...
 
 // 变量名、类名、方法名等符号表
@@ -95,18 +79,7 @@ Link Map 是 App 编译过程的中间产物，记载了二进制文件的布局
 0x1000057AC	0x0000005C	[  1] ___30+[YECallMonitor shareInstance]_block_invoke
 0x100005808	0x00000024	[  1] -[YECallMonitor start]
 0x10000582C	0x00000024	[  1] -[YECallMonitor stop]
-0x100005850	0x00000200	[  1] -[YECallMonitor getThreadCallRecord]
-0x100005A50	0x000002F8	[  1] ___36-[YECallMonitor getThreadCallRecord]_block_invoke
-0x100005D48	0x000000A4	[  1] ___copy_helper_block_e8_32s40s48s
-0x100005DEC	0x00000068	[  1] ___destroy_helper_block_e8_32s40s48s
-0x100005E54	0x0000002C	[  1] -[YECallMonitor setDepth:]
-0x100005E80	0x0000002C	[  1] -[YECallMonitor setMinTime:]
-0x100005EAC	0x00000024	[  1] -[YECallMonitor clear]
-0x100005ED0	0x00000028	[  1] -[YECallMonitor enable]
-0x100005EF8	0x0000026C	[  1] -[YECallMonitor setFilterClassNames:]
-0x100006164	0x00000230	[  1] -[YECallMonitor findStartDepthIndex:arr:]
-0x100006394	0x00000610	[  1] -[YECallMonitor recursive_getRecord:]
-0x1000069A4	0x00000240	[  1] -[YECallMonitor setRecordDic:record:]
+
 ...
 
 
@@ -120,23 +93,6 @@ Link Map 是 App 编译过程的中间产物，记载了二进制文件的布局
 <<dead>> 	0x0000000E	[  2] literal string: appendString:
 <<dead>> 	0x00000004	[  2] literal string: cls
 <<dead>> 	0x0000000E	[  2] literal string: .cxx_destruct
-<<dead>> 	0x00000002	[  2] literal string: +
-<<dead>> 	0x00000002	[  2] literal string: -
-<<dead>> 	0x00000020	[  2] CFString
-<<dead>> 	0x00000020	[  2] CFString
-<<dead>> 	0x0000000B	[  2] literal string: v24@0:8@16
-<<dead>> 	0x00000008	[  2] literal string: @16@0:8
-<<dead>> 	0x00000008	[  2] literal string: v16@0:8
-<<dead>> 	0x00000005	[  3] literal string: init
-<<dead>> 	0x0000000A	[  3] literal string: setDepth:
-<<dead>> 	0x00000006	[  3] literal string: class
-<<dead>> 	0x00000004	[  3] literal string: cls
-<<dead>> 	0x00000004	[  3] literal string: sel
-<<dead>> 	0x00000009	[  3] literal string: costTime
-<<dead>> 	0x00000006	[  3] literal string: depth
-<<dead>> 	0x00000006	[  3] literal string: total
-<<dead>> 	0x0000000A	[  3] literal string: callCount
-<<dead>> 	0x00000022	[  3] literal string: initWithCls:sel:time:depth:total:
 ...
 
 
@@ -148,14 +104,15 @@ Link Map 是 App 编译过程的中间产物，记载了二进制文件的布局
 
 ### SanitizerCoverage采集调用函数信息
 
-SanitizerCoverage内置在LLVM中，可以在函数、基本块和边界这些级别上插入对用户定义函数的回调，详细介绍可以在 [Clang 11 documentation](http://clang.llvm.org/docs/index.html) 找到。
+我们通过 SanitizerCoverage 采集调用函数信息， SanitizerCoverage 内置在LLVM中，可以在函数、基本块和边界这些级别上插入对用户定义函数的回调，属于**静态插桩**，代码会在编译过程中插入到每个函数中，详细介绍可以在 [Clang 11 documentation](http://clang.llvm.org/docs/index.html) 找到。
 
 在 build settings 里的 “Other C Flags” 中添加 `-fsanitize-coverage=func,trace-pc-guard`。如果含有 Swift 代码的话，还需要在 “Other Swift Flags” 中加入 `-sanitize-coverage=func` 和 `-sanitize=undefined`。需注意，所有链接到 App 中的二进制都需要开启 SanitizerCoverage，这样才能完全覆盖到所有调用。
 
-开启后，函数的调用会执行 `void __sanitizer_cov_trace_pc_guard(uint32_t *guard) {}` 回调，我们可在该回调中插入自己的统计代码，收集函数名，启动完成后再将数据导出。借鉴[玉令天下](http://yulingtianxia.com/)的实现代码，稍微修改了下，如需自取 [AppCallCollecter](https://github.com/SimonYHB/iOS-Develop-Tools/tree/master/IOSDevelopTools/AppCallCollecter)，代码如下：
+开启后，**函数的调用** 都会执行 `void __sanitizer_cov_trace_pc_guard(uint32_t *guard) {}` 回调，效果类似我们对 `objc_msgSend` 进行 Hook插桩，但该回调不止局限于 OC 函数，还包括 Swift、block、C等。
+
+我们在该回调中插入自己的统计代码，收集函数名，启动完成后再将数据导出。借鉴[玉令天下](http://yulingtianxia.com/)的实现代码，稍微修改了下，如需自取 [AppCallCollecter](https://github.com/SimonYHB/iOS-Develop-Tools/tree/master/IOSDevelopTools/AppCallCollecter)，完整代码如下：
 
 ```c
-
 
 static OSQueueHead qHead = OS_ATOMIC_QUEUE_INIT;
 static BOOL stopCollecting = NO;
@@ -165,6 +122,7 @@ typedef struct {
     void *next;
 } PointerNode;
 
+// start和stop地址之间的区别保存工程所有符号的个数
 void __sanitizer_cov_trace_pc_guard_init(uint32_t *start,
                                          uint32_t *stop) {
     static uint32_t N;  // Counter for the guards.
@@ -172,32 +130,25 @@ void __sanitizer_cov_trace_pc_guard_init(uint32_t *start,
     printf("INIT: %p %p\n", start, stop);
     for (uint32_t *x = start; x < stop; x++)
         *x = ++N;  // Guards should start from 1.
+    
+    printf("totasl count %i\n", N);
 }
 
-// This callback is inserted by the compiler on every edge in the
-// control flow (some optimizations apply).
-// Typically, the compiler will emit the code like this:
-//    if(*guard)
-//      __sanitizer_cov_trace_pc_guard(guard);
-// But for large functions it will emit a simple call:
-//    __sanitizer_cov_trace_pc_guard(guard);
+
+// 每个函数调用时都会先跳转执行该函数
 void __sanitizer_cov_trace_pc_guard(uint32_t *guard) {
-    // If initialization has not occurred yet (meaning that guard is uninitialized), that means that initial functions like +load are being run. These functions will only be run once anyways, so we should always allow them to be recorded and ignore guard
-    if (stopCollecting && !*guard) {
+    // +load方法先于guard_init调用，此时guard为0
+//    if(!*guard) { return }
+
+    if (stopCollecting) {
         return;
     }
 
-    // If you set *guard to 0 this code will not be called again for this edge.
-    // Now you can get the PC and do whatever you want:
-    //   store it somewhere or symbolize it and print right away.
-    // The values of `*guard` are as you set them in
-    // __sanitizer_cov_trace_pc_guard_init and so you can make them consecutive
-    // and use them to dereference an array or a bit vector.
-    *guard = 0;
     // __builtin_return_address 获取当前调用栈信息，取第一帧地址
     void *PC = __builtin_return_address(0);
     PointerNode *node = malloc(sizeof(PointerNode));
     *node = (PointerNode){PC, NULL};
+    // 使用原子队列要存储帧地址
     OSAtomicEnqueue(&qHead, node, offsetof(PointerNode, next));
 
     
@@ -215,14 +166,17 @@ extern NSArray <NSString *> *getAllFunctions(NSString *currentFuncName) {
         // dladdr获取地址符号信息
         dladdr(front->pointer, &info);
         NSString *name = @(info.dli_sname);
+        // 去除重复调用
         if([unqSet containsObject:name]) {
             continue;
         }
         BOOL isObjc = [name hasPrefix:@"+["] || [name hasPrefix:@"-["];
+        // order文件格式要求C函数和block前需要添加_
         NSString *symbolName = isObjc ? name : [@"_" stringByAppendingString:name];
         [unqSet addObject:name];
         [functions addObject:symbolName];
     }
+
     return [[functions reverseObjectEnumerator] allObjects];;
 
 }
@@ -232,7 +186,6 @@ extern NSArray <NSString *> *getAllFunctions(NSString *currentFuncName) {
 extern NSArray <NSString *> *getAppCalls(void) {
     
     stopCollecting = YES;
-    // 内存屏障，防止cpu的乱序执行调度内存（原子锁）
     __sync_synchronize();
     NSString* curFuncationName = [NSString stringWithUTF8String:__FUNCTION__];
     return getAllFunctions(curFuncationName);
@@ -246,7 +199,7 @@ extern void appOrderFile(void(^completion)(NSString* orderFilePath)) {
     stopCollecting = YES;
     __sync_synchronize();
    NSString* curFuncationName = [NSString stringWithUTF8String:__FUNCTION__];
-    
+    // 异步存储到文件中
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.01 * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSArray *functions = getAllFunctions(curFuncationName);
         NSString *orderFileContent = [functions.reverseObjectEnumerator.allObjects componentsJoinedByString:@"\n"];
@@ -262,6 +215,107 @@ extern void appOrderFile(void(^completion)(NSString* orderFilePath)) {
     });
 }
 ```
+
+### 关键代码解析
+
+这里详细介绍下每个函数的作用。
+
+```objective-c
+void __sanitizer_cov_trace_pc_guard_init(uint32_t *start,
+                                         uint32_t *stop) {
+  
+    static uint32_t N;  // Counter for the guards.
+    if (start == stop || *start) return;  // Initialize only once.
+    printf("INIT: %p %p\n", start, stop);
+    for (uint32_t *x = start; x < stop; x++)
+        *x = ++N;  // Guards should start from 1.
+    
+    printf("totasl count %i\n", N);
+}
+
+
+```
+
+dyld 每链接一个开启 `SanitizerCoverage` 配置的 dylib 都会执行一次  `__sanitizer_cov_trace_pc_guard_init `，`start` 和 `stop` 之间的区间保存了该 dylib 的符号个数，我们通过设置静态全局变量 N 可统计所有 dylib 的符号。
+
+如果不需要以上内容可以仅执行空函数 `void __sanitizer_cov_trace_pc_guard_init(uint32_t *start,
+                                         uint32_t *stop){}`，不会影响后面的调用。
+
+```objective-c
+
+// 每个函数调用时都会先跳转执行该函数
+void __sanitizer_cov_trace_pc_guard(uint32_t *guard) {
+
+    // +load方法先于guard_init调用，此时guard为0
+//    if(!*guard) { return }
+
+    if (stopCollecting) {
+        return;
+    }
+
+    // __builtin_return_address 获取当前调用栈的下一条指令地址
+    void *PC = __builtin_return_address(0);
+    PointerNode *node = malloc(sizeof(PointerNode));
+    *node = (PointerNode){PC, NULL};
+    // 使用原子队列要存储帧地址
+    OSAtomicEnqueue(&qHead, node, offsetof(PointerNode, next));
+}
+```
+
+![image-20200410174421317](./images/二进制重排10.png)
+
+我们通过汇编可发现，每个函数调用前都被插入了`__sanitizer_cov_trace_pc_guard`，所以我们在该函数中，利用 `__builtin_return_address` 获取运行栈的情况，保存第一条指令地址，即函数地址。
+
+注意，由于存在多线程调用的问题，此时需要用锁来保证符号存储，这里我们使用原子队列，执行效率高且队列存储数据，不需要再额外加锁处理和创建数组。
+
+```objective-c
+extern NSArray <NSString *> *getAllFunctions(NSString *currentFuncName) {
+    NSMutableSet<NSString *> *unqSet = [NSMutableSet setWithObject:currentFuncName];
+    NSMutableArray <NSString *> *functions = [NSMutableArray array];
+    while (YES) {
+        PointerNode *front = OSAtomicDequeue(&qHead, offsetof(PointerNode, next));
+        if(front == NULL) {
+            break;
+        }
+        Dl_info info = {0};
+        // dladdr获取地址符号信息
+        dladdr(front->pointer, &info);
+        NSString *name = @(info.dli_sname);
+        // 去除重复调用
+        if([unqSet containsObject:name]) {
+            continue;
+        }
+        BOOL isObjc = [name hasPrefix:@"+["] || [name hasPrefix:@"-["];
+        // order文件格式要求C函数和block前需要添加_
+        NSString *symbolName = isObjc ? name : [@"_" stringByAppendingString:name];
+        [unqSet addObject:name];
+        [functions addObject:symbolName];
+    }
+
+    return [[functions reverseObjectEnumerator] allObjects];;
+
+}
+```
+
+```objective-c
+/*
+ * Structure filled in by dladdr().
+ */
+typedef struct dl_info {
+        const char      *dli_fname;     /* Pathname of shared object */
+        void            *dli_fbase;     /* Base address of shared object */
+        const char      *dli_sname;     /* Name of nearest symbol */
+        void            *dli_saddr;     /* Address of nearest symbol */
+} Dl_info;
+
+extern int dladdr(const void *, Dl_info *);
+```
+
+将收集的函数地址从原子队列中取出，通过 `dladdr`  获取地址的对应符号信息，最后将数组排序逆转即可得到按顺序排序的调用函数数组。
+
+
+
+### 结果对比
 
 在项目启动后调用 `appOrderFile` 方法，将调用列表写到沙盒中，通过在 Devices 下载 xcappdata 文件即可获取该列表。
 
@@ -297,10 +351,6 @@ _main
 ```
 
 最后在 `Order File` 配置下文件地址，重新编译打包。
-
-
-
-### 结果对比
 
 从重排后的 Link Map Symbols 部分可以看到此时的载入顺序跟我们的 order file 文件是一致的。
 
@@ -343,7 +393,7 @@ _main
 
 ## 总结
 
-网上还有其他方案来实现二进制重排，抖音通过手动插桩获取的符号数据（包括C++静态初始化、+Load、Block等）会更加准确，但就其复杂度来说感觉性价比不高，而手淘的方案比较特殊，通过修改 .o 目标文件实现静态插桩，需要对目标代码较为熟悉，通用性不高。  
+
 
 由于在 iOS 上，一页有16KB（Mac 为4KB），可以存放大量代码，所以在启动阶段执行 `page fault` 的次数并不会很多，二进制重排相比于其他优化手段，提升效果不明显，应优先从其他方面去进行启动优化（关于这部分的文章近期就会发布），最后再考虑是否做重排优化，但从技术学习的层面还是值得研究的 😁。
 
