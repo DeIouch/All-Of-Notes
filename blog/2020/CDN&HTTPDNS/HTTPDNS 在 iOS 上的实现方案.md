@@ -70,6 +70,13 @@ HttpDNS 整体方案需要服务器和移动端互相配合，在移动端主要
 
 ### 服务器下发 IP 配置
 
+在 App 启动时或者合适的时间向服务器请求配置表，这里的请求可以用固定 IP 替代域名，免去域名解析的过程。这里要注意的点是，如果使用 IP 请求，**需要在 header 指定 host 字段**。
+
+```objective-c
+NSString *host = "a.test.com";
+[request setValue:host forHTTPHeaderField:@"Host"];
+```
+
 具体下发的配置表格式根据实际需求而定即可，例如：
 
 ```json
@@ -97,13 +104,29 @@ HttpDNS 整体方案需要服务器和移动端互相配合，在移动端主要
 	
 ```
 
-### 接口封装
-
 ### 注入方案
+
+https://juejin.im/post/5e0d580b5188253a5c7d12fc#heading-8
+
+https://juejin.im/post/58feef7261ff4b0066776d73#heading-28
 
 ### 缓存策略
 
 ### 解决 HTTPS 证书校验问题
+
+自从苹果推行 HTTPS 后，已成功客户端的基本网络请求协议。
+
+Host公钥加密，ip发送请求，服务端ip接口请求，ip解析成host，用host私钥解析
+
+如果ip存在一对多证书（SNI）会有问题，
+
+相关代码：ALDSessionManager 200行
+
+https://www.jianshu.com/p/1839c6985c14
+
+https://www.jianshu.com/p/66ffa9b69c17
+
+https://www.jianshu.com/p/59d1cbf34d67
 
 ### 容错处理
 
@@ -111,9 +134,23 @@ HttpDNS 整体方案需要服务器和移动端互相配合，在移动端主要
 
 ### 总流程图
 
+请求流程
+
+安全校验流程
+
+http://www.52im.net/thread-2121-1-1.html
+
+http://www.52im.net/thread-2172-1-1.html
+
+http://www.52im.net/thread-2472-1-1.html
+
+### WKWebView和AVPlayer处理HTTPDNS
+
 ## CDN 拓展方案
 
 ### 什么是cdn
+
+### SNI是什么
 
 ### 作为httpdns的降级方案接入
 
