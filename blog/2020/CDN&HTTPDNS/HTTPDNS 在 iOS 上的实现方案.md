@@ -136,6 +136,8 @@ https://juejin.im/post/58feef7261ff4b0066776d73#heading-28
 
 ### 解决 HTTPS 证书校验问题
 
+SSL认证使用的是真实域名去进行认证
+
 自从苹果推行 HTTPS 后，已成功客户端的基本网络请求协议。
 
 Host公钥加密，ip发送请求，服务端ip接口请求，ip解析成host，用host私钥解析
@@ -149,6 +151,12 @@ https://www.jianshu.com/p/1839c6985c14
 https://www.jianshu.com/p/66ffa9b69c17
 
 https://www.jianshu.com/p/59d1cbf34d67
+
+```objective-c
+setSessionDidReceiveAuthenticationChallengeBlock
+```
+
+
 
 ### 容错处理
 
