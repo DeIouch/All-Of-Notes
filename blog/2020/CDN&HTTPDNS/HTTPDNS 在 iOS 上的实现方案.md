@@ -1,4 +1,4 @@
-# HttpDNS 在 iOS 上的实现方案
+# HttpDNS 在 iOS 上的实现方案 
 
 ## 前言
 
@@ -62,11 +62,11 @@ LocalDNS 缓存了之前的解析结果，当再次收到解析请求时不再�
 
 
 
-## iOS 端的实现
+## iOS 端的网络请求实现
 
 HttpDNS 整体方案需要服务器和移动端互相配合，在移动端主要是对网络请求进行封装，替换域名请求，做到对用户无感知，做好缓存和容错处理，并对成功/失败请求记录日志上传到服务器；服务器则需要维护域名与 IP 映射关系表并提供下发接口，并通过客户端日志进行优化排序。
 
-接下来我们探讨一些实现的关键步骤。
+接下来我们探讨一些实现的步骤。
 
 ### 服务器下发 IP 配置
 
@@ -81,156 +81,387 @@ NSString *host = "a.test.com";
 
 ```json
 {
-    service = "深圳移动";
-    domainlist =     [
-                {
-            domain = "a.test.com";
-            ips =             [
-                "222.66.22.111",
-  							"222.66.22.102",
-            ];
-        },
-                {
-            domain = "b.test.com";
-            ips =             [
-                "202.29.13.214"
-            ];
-        },
-				...
-				...
-    ];
-    enable = 1;
+	"service" : "深圳移动",
+	"enable" : 1,
+	"domainlist" : [
+				{
+				"domain": "a.test.com",
+          		  "ips" :  [
+              				"222.66.22.111",
+							"222.66.22.102"
+           					]
+				},
+				{
+				"domain": "b.test.com",
+          		  "ips" :  [
+              				 "202.29.13.214"
+           					]
+				}
+
+	]
 }
-	
+
+
+
 ```
 
 ### 封装网络请求
 
-这里使用的网络框架 `AFNetworking`，我们的封装是基于该框架进行的。与普通的网络请求封装区别于需在正式发起请求前先用 IP 替代域名。
+这里使用的网络框架 `AFNetworking`，我们的封装是基于该框架进行的。
 
 ```objective-c
 
+/**
+ 请求后返回的block
+ */
+typedef void(^YENetworkManagerResponseCallBack)(NSDictionary *response, NSDictionary *error);
 
+
+
+@interface YENetworkManager : NSObject
+
++ (nonnull instancetype)shareInstance;
+
+/**
+ 获取服务器的DNS数据
+ */
+- (void)requestRemoteDNSList;
+
+/**
+ *  网络请求
+ *  @param url             请求地址
+ *  @param paraDic         请求入参 {key: value}
+ *  @param method          请求类型 GET|POST
+ *  @param timeoutInterval 请求超时时间
+ *  @param headersDic      请求头 {key: value}
+ *  @param callBack        请求结果回调
+ */
+- (void)requestWithUrl:(NSString *)url
+                  body:(NSDictionary *)paraDic
+                method:(NSString *)method
+               timeOut:(NSTimeInterval)timeoutInterval
+               headers:(NSDictionary *)headersDic
+              callBack:(YENetworkManagerResponseCallBack)callBack;
+
+@end
+
+```
+
+对外暴露两个接口，分别用于拉取 DNS 配置和网络请求，网络请求部分区别在于需在正式发起请求前先用 IP 替代域名，先看下简单的实现。
+
+拉取配置这里先直接从本地读取，实际项目的还是应该去请求后台接口获取数据。
+
+```objective-c
+- (void)requestRemoteDNSList  {
+    // 具体的实现根据服务端要求
+    NSError*error = nil;
+    NSData *data = [[NSData alloc] initWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"dns.json" ofType:nil]];
+    NSDictionary *dic = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingAllowFragments error:&error];
+    NSArray *domainlist = dic[@"domainlist"];
+    NSMutableArray *tempDNSEntityArray = [[NSMutableArray alloc] initWithCapacity:0];
+    for (NSDictionary *domainDict in domainlist)
+    {
+        //创建实体并保存
+        YEDNSEntity *cdnsEntity = [YEDNSEntity yy_modelWithDictionary:domainDict];
+        [tempDNSEntityArray addObject:cdnsEntity];
+    }
+    self.dnsEntityListCache = tempDNSEntityArray;
+    // TODO: 根据实际需求是否需要存入本地数据库
+}
+```
+
+转换 ip 是，将域名作为键，在缓存中查来相应的地址，若命中则创建新的 request，并完成：
+
+1. 以 ip 替换接口域名
+2. 添加域名到头部 host 字段
+3. 将原 request 的 Cookie 设置到新 request
+
+```objective-c
+// 判断是否支持
+- (BOOL)supportHTTPDNS:(NSURLRequest*)request {
+
+    //无DNS数据不处理
+    if (self.dnsEntityListCache.count == 0) {
+        return NO;
+    }
+
+    //本地请求不处理
+    if ([request.URL.scheme rangeOfString:@"http"].location == NSNotFound)
+    {
+        return NO;
+    }
+
+
+    //IP不处理
+    if ([self isIPAddressString:request.URL.host])
+    {
+        return NO;
+    }
+    return YES;
+}
+
+// HTTPDNS转换
+- (NSURLRequest *)transfromHTTPDNSRequest:(NSURLRequest *)request {
+    if ([self supportHTTPDNS:request]) {
+        YEDNSEntity *entity = [self queryDNSEntityWithDomain:request.URL.host];
+        if (entity == nil) {
+            return request;
+        }
+        // 创建ip请求
+        NSMutableURLRequest *newURLRequest = request.mutableCopy;
+        NSString *ipAddress = nil;
+        if (entity.ips && entity.ips.count > 0 && (ipAddress = entity.ips.firstObject))
+        {
+            //原始host替换为IP
+            NSString *originalHost = request.URL.host;
+            NSString *newUrlString = [newURLRequest.URL.absoluteString stringByReplacingFirstOccurrencesOfString:originalHost withString:ipAddress];
+            newURLRequest.URL = [NSURL URLWithString:newUrlString];
+            
+            //添加host头部
+            NSString *realHost = originalHost;
+            [newURLRequest setValue:realHost forHTTPHeaderField:@"host"];
+            
+            //添加原始域名对应的Cookie
+            NSString *cookie = [self getCookieHeaderForRequestURL:request.URL];
+            if (cookie)
+            {
+                [newURLRequest setValue:cookie forHTTPHeaderField:@"Cookie"];
+            }
+        }
+        return newURLRequest;
+        
+    }
+    return request;
+}
+```
+
+这样我们就拿到了新的 ip 的请求体，通过 AFNetworking 发出请求即可。
+
+```objective-c
+- (void)requestWithUrl:(NSString *)url
+                  body:(NSDictionary *)paraDic
+                method:(NSString *)method
+               timeOut:(NSTimeInterval)timeoutInterval
+               headers:(NSDictionary *)headersDic
+              callBack:(YENetworkManagerResponseCallBack)callBack {
+    // 参数异常处理
+		// ....
+    
+    // 序列化工具
+    AFHTTPRequestSerializer *requestSerializer = [AFJSONRequestSerializer serializer];
+    // 设置超时时间
+    requestSerializer.timeoutInterval = timeoutInterval < 0 ? 10 :timeoutInterval;
+    // 设置请求头
+    for (NSString *headerName in headersDic.allKeys)
+    {
+        NSString *headerValue = [headersDic objectForKey:headerName];
+        [requestSerializer setValue:headerValue forHTTPHeaderField:headerName];
+    }
+    
+    // 构建原始request
+    NSURLRequest *originalRequest =  [requestSerializer requestWithMethod:method
+                                                                 URLString:url
+                                                                parameters:[paraDic count] == 0 ? nil : paraDic
+                                                                     error:nil];
+
+    // HTTPDNS处理
+    NSURLRequest *ipRequest = [self transfromHTTPDNSRequest:originalRequest];
+    
+    // SessionManager
+    [[YESessionTool shareInstance] getSessionManagerWithRequest:ipRequest callBack:^(YESessionManager * _Nonnull sessionManager) {
+        [sessionManager dataTaskWithRequest:ipRequest uploadProgress:^(NSProgress * _Nonnull uploadProgress) {
+            //不处理
+        } downloadProgress:^(NSProgress * _Nonnull downloadProgress) {
+            //不处理
+        } completionHandler:^(NSURLResponse * _Nonnull response, id  _Nullable responseObject, NSError * _Nullable error) {
+            if (callBack) {
+                if (error) {
+                        NSDictionary *errorDic = [NSDictionary dictionaryWithObject:error.description forKey:@"message"];
+                        callBack(@{}, errorDic);
+                    
+                } else {
+                    // 数据解析
+                    NSDictionary *responseDict = [responseObject objectFromJSONData];
+                    
+                    if (responseDict != nil && [responseDict isKindOfClass:[NSDictionary class]]) {
+                        callBack(responseDict, @{});
+                    } else {
+                        NSDictionary *errorDic = [NSDictionary dictionaryWithObject:@"数据解析错误" forKey:@"message"];
+                        callBack(@{}, errorDic);
+                    }
+                }
+            }
+        }];
+    }];
+    
+}
+```
+
+### 容错处理&埋点
+
+使用 IP 请求出现问题时，我们需要降级处理，使用备用 ip 或者域名再次尝试请求，除此之外，再请求结束后最好上传成功或失败的日志，便于服务器分析 IP 的可用性，我们改造下上面的请求响应部分：
+
+```objective-c
+// SessionManager
+    [[YESessionTool shareInstance] getSessionManagerWithRequest:ipRequest callBack:^(YESessionManager * _Nonnull sessionManager) {
+        [sessionManager dataTaskWithRequest:ipRequest uploadProgress:^(NSProgress * _Nonnull uploadProgress) {
+            //不处理
+        } downloadProgress:^(NSProgress * _Nonnull downloadProgress) {
+            //不处理
+        } completionHandler:^(NSURLResponse * _Nonnull response, id  _Nullable responseObject, NSError * _Nullable error) {
+            if (callBack) {
+                if (error) {
+                    
+                    //TODO: 失败埋点上传
+                    // 降级请求
+                    if ([self canDegradeForRequest:ipRequest.URL error:error]) {
+                        // 移除该IP
+                        [self removeIpInCacheWithDomain:originalRequest.URL.host ip:ipRequest.URL.host];
+                        // 重新发起
+                        [self requestWithUrl:url body:paraDic method:method timeOut:timeoutInterval headers:headersDic callBack:callBack];
+                    } else {
+                        NSDictionary *errorDic = [NSDictionary dictionaryWithObject:error.description forKey:@"message"];
+                        callBack(@{}, errorDic);
+                    }
+                    
+                } else {
+                    //TODO: 成功埋点上传
+                    // 保存Cookie
+                    if (![self isIPAddressString:originalRequest.URL.host] && ![originalRequest.URL.host isEqualToString:ipRequest.URL.host]) {
+                        NSDictionary *responseHeaderDict = ((NSHTTPURLResponse *)response).allHeaderFields;
+                        [self storageHeaderFields:responseHeaderDict forURL:ipRequest.URL];
+                    }
+                    // 数据解析
+                    NSDictionary *responseDict = [responseObject objectFromJSONData];
+                    
+                    if (responseDict != nil && [responseDict isKindOfClass:[NSDictionary class]]) {
+                        callBack(responseDict, @{});
+                    } else {
+                        NSDictionary *errorDic = [NSDictionary dictionaryWithObject:@"数据解析错误" forKey:@"message"];
+                        callBack(@{}, errorDic);
+                    }
+                }
+               
+
+            }
+        }];
+    }];
 ```
 
 
 
+### 解决安全证书校验问题
 
-
-
-
-1. 成功请求&埋点
-2. 失败降级处理&埋点
-
-ALDNetworkService 139
-
-
-
-https://juejin.im/post/5e0d580b5188253a5c7d12fc#heading-8
-
-https://juejin.im/post/58feef7261ff4b0066776d73#heading-28
-
-
-
-### 缓存策略
-
-### 解决 HTTPS 证书校验问题
-
-SSL认证使用的是真实域名去进行认证
-
-自从苹果推行 HTTPS 后，已成功客户端的基本网络请求协议。
-
-Host公钥加密，ip发送请求，服务端ip接口请求，ip解析成host，用host私钥解析
-
-如果ip存在一对多证书（SNI）会有问题，
-
-相关代码：ALDSessionManager 200行
-
-https://www.jianshu.com/p/1839c6985c14
-
-https://www.jianshu.com/p/66ffa9b69c17
-
-https://www.jianshu.com/p/59d1cbf34d67
+证书校验分为 IP 请求和域名请求，对于普通的域名请求，我们只需要设置 SessionManager 安全策略即可。
 
 ```objective-c
-setSessionDidReceiveAuthenticationChallengeBlock
+// 域名请求的证书校验设置
+- (void)setDomainNetPolicy: (YESessionManager *)manager request:(NSURLRequest *)request {
+    AFSecurityPolicy *securityPolicy = [AFSecurityPolicy policyWithPinningMode:AFSSLPinningModeCertificate];
+    securityPolicy.validatesDomainName = YES;
+    securityPolicy.allowInvalidCertificates = YES;
+    // 从本地获取cer证书，仅作参考
+    NSString * cerPath = [[NSBundle mainBundle] pathForResource:CerFile ofType:@"cer"];
+    NSData * cerData = [NSData dataWithContentsOfFile:cerPath];
+    securityPolicy.pinnedCertificates = [NSSet setWithObject:cerData];
+    manager.securityPolicy = securityPolicy;
+    
+}
 ```
 
+IP 请求部分稍微复杂点，我们在收到服务器安全认证请求时，再用**真实域名**和本地证书去进行校验，AFNetworking 提供了 `setSessionDidReceiveAuthenticationChallengeBlock` 和 `setTaskDidReceiveAuthenticationChallengeBlock` 方法可以让我们设置认证请求时的回调。
+
+```objective-c
+// IP请求的证书校验设置
+- (void)setIPNetPolicy: (YESessionManager *)manager request:(NSURLRequest *)request {
+    // 判断是否存在域名
+    NSString *realDomain = [request.allHTTPHeaderFields objectForKey:@"host"];
+    if (realDomain == nil || realDomain.length == 0) {
+        //无域名不验证
+        return;
+    }
+    // 通过客户端验证服务器信任凭证
+    [manager setSessionDidReceiveAuthenticationChallengeBlock:^NSURLSessionAuthChallengeDisposition(NSURLSession * _Nonnull session, NSURLAuthenticationChallenge * _Nonnull challenge, NSURLCredential *__autoreleasing  _Nullable * _Nullable credential) {
+        return [self handleReceiveAuthenticationChallenge:challenge credential:credential host:realDomain];
+    }];
+    [manager setTaskDidReceiveAuthenticationChallengeBlock:^NSURLSessionAuthChallengeDisposition(NSURLSession * _Nonnull session, NSURLSessionTask * _Nonnull task, NSURLAuthenticationChallenge * _Nonnull challenge, NSURLCredential *__autoreleasing  _Nullable * _Nullable credential) {
+        return [self handleReceiveAuthenticationChallenge:challenge credential:credential host:realDomain];
+    }];
+}
 
 
-### 容错处理
-
-降级访问
-
-### 总流程图
-
-请求流程
-
-安全校验流程
-
-http://www.52im.net/thread-2121-1-1.html
-
-http://www.52im.net/thread-2172-1-1.html
-
-http://www.52im.net/thread-2472-1-1.html
-
-### WKWebView和AVPlayer处理HTTPDNS
-
-## CDN 拓展方案
-
-### 什么是cdn
-
-### SNI是什么
-
-### 作为httpdns的降级方案接入
-
-```json
+// 处理认证请求发生的回调
+- (NSURLSessionAuthChallengeDisposition)handleReceiveAuthenticationChallenge:(NSURLAuthenticationChallenge*)challenge
+                                                       credential:(NSURLCredential**)credential
+                                                             host:(NSString*)host
 {
-    service = "深圳移动";
-    domainlist =     [
-                {
-            domain = "a.test.com";
-            ips =             [
-                "222.66.22.111",
-  							"222.66.22.102",
-            ];
-        },
-                {
-            domain = "b.test.com";
-            ips =             [
-                "202.29.13.214"
-            ];
-        },
-								{
-            cdn = 1;
-            cdnSource = "cdna.test.com";
-            domain = "a-static.test.com"
-            ips =             [
-            ];
+    NSURLSessionAuthChallengeDisposition disposition = NSURLSessionAuthChallengePerformDefaultHandling;
+    if ([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust])
+    {
+        //验证域名是否被信任
+        if ([self evaluateServerTrust:challenge.protectionSpace.serverTrust forDomain:host])
+        {
+            *credential = [NSURLCredential credentialForTrust:challenge.protectionSpace.serverTrust];
+            if (*credential)
+            {
+                disposition = NSURLSessionAuthChallengeUseCredential;
+            }
+            else
+            {
+                disposition = NSURLSessionAuthChallengePerformDefaultHandling;
+            }
+        }
+        else
+        {
+            disposition = NSURLSessionAuthChallengeCancelAuthenticationChallenge;
+        }
+    }
+    else
+    {
+        disposition = NSURLSessionAuthChallengePerformDefaultHandling;
+    }
+    return disposition;
+}
 
-        },
-                {
-            cdn = 1;
-            cdnSource = "cdnb.test.com.";
-            domain = "css.test.com";
-            ips =             [
-            ];
-
-        },
-				...
-				...
-    ];
-    enable = 1;
+//验证域名
+- (BOOL)evaluateServerTrust:(SecTrustRef)serverTrust forDomain:(NSString *)domain
+{
+    
+    AFSecurityPolicy *securityPolicy = [AFSecurityPolicy policyWithPinningMode:AFSSLPinningModeCertificate];
+    securityPolicy.validatesDomainName = YES;
+    securityPolicy.allowInvalidCertificates = YES;
+    // 从本地获取cer证书,仅作参考
+    NSString * cerPath = [[NSBundle mainBundle] pathForResource:CerFile ofType:@"cer"];
+    NSData * cerData = [NSData dataWithContentsOfFile:cerPath];
+    securityPolicy.pinnedCertificates = [NSSet setWithObject:cerData];
+    
+    return [securityPolicy evaluateServerTrust:serverTrust forDomain:domain];
 }
 ```
 
 
+
+### 总流程图
+
+![图片来源于网络](./images/03.jpg)
 
 
 
 ## 总结
 
+本文简单介绍了 HttpDNS 和域名解析带来的问题，代码部分已放在 [IOSDevelopTools-Network](https://github.com/SimonYHB/iOS-Develop-Tools/tree/master/IOSDevelopTools/IOSDevelopTools/Network)，仅作参考，还需根据实际项目来接入功能。
 
+目前实现跟网络请求耦合在一起，还不算是完美的解决方案，后续有时间再补充 **HTTPDNS模块的解耦** 和 **WKWebview及AVplayer的处理**，敬请期待吧 😂。
+
+
+
+### About Me  
+
+- [掘金](https://juejin.im/user/58229b8ea0bb9f0058cd2738/posts)
+
+- [Github](https://github.com/SimonYHB)
+
+  
 
 ### 参考链接
 
